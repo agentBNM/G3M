@@ -4,7 +4,7 @@ import datetime
 from IPython.display import display, HTML
 import matplotlib.pyplot as plt
 from scipy import stats
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize_scalar, minimize
 import glob
 
 def H(x):
@@ -67,9 +67,11 @@ def largest_small_buyX(St, tau):
     beta = alpha/(1-alpha)
     def sq_error(dy):
         dx = get_dx(dy, x, y, tau, beta)
-        return (beta * (y+dy) / (x+dx) * (1-tau) - St )**2
-    res = minimize_scalar(sq_error,bounds=(0,1e9), method='bounded')
+        b = (1-tau) * beta * (y+dy) / (x+dx)
+        return (St- b)**2 + (St<b)*0.01
+    res = minimize_scalar(sq_error,bounds=(0,10_000), method='bounded')
     dy = res.x
+    
     return [get_dx(dy, x, y, tau, beta), dy]
 
 def largest_small_sellX(St, tau):
@@ -82,8 +84,9 @@ def largest_small_sellX(St, tau):
     beta = alpha/(1-alpha)
     def sq_error(dx):
         dy = get_dy(dx, x, y, tau, beta)
-        # new bid price = St
-        return (beta * (y+dy) / (x+dx)  - St * (1-tau))**2
+        # new ask price = St
+        a = 1/(1-tau) * beta * (y+dy) / (x+dx)
+        return (a-St)**2 + (St>a)*0.01
     res = minimize_scalar(sq_error,bounds=(0,2), method='bounded')
     dx = res.x
     return [dx, get_dy(dx, x, y, tau, beta)]
@@ -91,32 +94,56 @@ def largest_small_sellX(St, tau):
 def buy_arbitrage(St, tau):
     global alpha
     global x, y
+    beta = alpha/(1-alpha)
     #S[t]>ask
     # pre-condition: arbitrage
     [_,a] = bid_ask(tau)
     assert(St>a)
 
-    def sq_error(dy):
+    dy = y/(1-tau) * ((St/a)**alpha - 1)
+    dx = get_dx(dy, x, y, tau, beta)
+    a = 1/(1-tau) * beta * (y+dy)/(x+dx)
+    while St>a:
+        # numerical
+        dy = dy+1e-5
         dx = get_dx(dy, x, y, tau, beta)
-        return (beta * (y+(1-tau) * dy) / (x+dx)  - St * (1-tau))**2
-    res = minimize_scalar(sq_error,bounds=(0,1e9), method='bounded')
-    dy = res.x
+        a = 1/(1-tau) * beta * (y+dy)/(x+dx)
+    # numerical
+    #def sq_error(dy):
+    #    dx = get_dx(dy, x, y, tau, beta)
+    #    return (beta * (y+(1-tau) * dy) / (x+dx)  - St * (1-tau))**2
+    #res = minimize(sq_error,x0=dy)
+    #dy = res.x
     return [get_dx(dy, x, y, tau, beta), dy]
 
 def sell_arbitrage(St, tau):
     global alpha
     global x, y
+    beta = alpha/(1-alpha)
     #S[t]<bid
     # pre-condition: arbitrage
     [b,_] = bid_ask(tau)
     assert(St<b)
 
-    def sq_error(dx):
+    # analytical
+    dx = x/(1-tau) * ((b/St)**(1-alpha) - 1)
+    dy = get_dy(dx, x, y, tau, beta)
+    b = (1-tau) * beta * (y+dy)/(x+dx) 
+    while St<b:
+        # numerical
+        dx = dx+1e-12
         dy = get_dy(dx, x, y, tau, beta)
-        # new bid price = St
-        return (beta * (y+dy) / (x+(1-tau) * dx)  - St / (1-tau))**2
-    res = minimize_scalar(sq_error,bounds=(0,2), method='bounded')
-    dx = res.x
+        beta = alpha/(1-alpha)
+        b = (1-tau) * beta * (y+dy)/(x+dx) 
+    #def sq_error(dx):
+    #    if dx<0:
+    #        return 100
+    #    dy = get_dy(dx, x, y, tau, beta)
+    #    # new bid price = St
+    #    return (beta * (y+dy) / (x+(1-tau) * dx)  - St / (1-tau))**2
+    #res = minimize(sq_error,x0=dx)
+    #dx = res.x
+
     return [dx, get_dy(dx, x, y, tau, beta)]
 
 def exec_arbitrage_trade(St, tau):
@@ -125,21 +152,18 @@ def exec_arbitrage_trade(St, tau):
     [bid, ask] = bid_ask(tau)
     b=bid
     a=ask
-    k=0
+    if St==18076.5:
+        pass
     num_arb = 0
-    while St<b or St>a:
-        if b>St:
-            [dx, dy] = sell_arbitrage(St, tau)
-            swap(dx, 0, tau)
-            num_arb+=1
-        elif a<St:
-            [dx, dy] = buy_arbitrage(St, tau)
-            swap(0, dy, tau)
-            num_arb+=1
-        [b,a] = bid_ask(tau)
-        k=k+1
-    #if k>1:
-    #    print("num arbitrage trades=",k)
+    if b>St:
+        [dx, dy] = sell_arbitrage(St, tau)
+        swap(dx, 0, tau)
+        num_arb=1
+    elif a<St:
+        [dx, dy] = buy_arbitrage(St, tau)
+        swap(0, dy, tau)
+        num_arb=1
+    [b,a] = bid_ask(tau)
     assert(St>=b and St<=a)
     return num_arb
 
@@ -173,35 +197,42 @@ def sim(prob_small, prob_trade, y_start, tau):
             # arb trade, small trade, large trade+arb
             if np.random.uniform(0,1) < prob_trade:
                 trades=1
+                [bid, ask] = bid_ask(tau)
                 if np.random.uniform(0,1) < prob_small:
                     # perform a small trade
-                    if np.random.uniform(0,1)<prob_buy:
+                    if S[t]-bid > ask-S[t]:
                         # buy
                         resXY = largest_small_buyX(S[t], tau)
                         trade = resXY[1]-eps
                         if trade>0:
-                            swap(0, resXY[1]-eps, tau)
+                            swap(0, trade, tau)
                             total_small_trades += 1
                     else:
                         resXY = largest_small_sellX(S[t], tau)
-                        trade = resXY[0]-eps/S[t]
+                        trade = resXY[0]-eps/S[t]*2
                         if trade>0:
-                            swap(resXY[0]-eps/S[t], 0, tau)
+                            swap(trade, 0, tau)
                             total_small_trades += 1
+                    arb_trades = exec_arbitrage_trade(S[t], tau)
+                    assert(arb_trades==0)
                 else:
-                    # perform large trade
+                    # perform large trade: direction is random
                     if np.random.uniform(0,1)<prob_buy:
                         # buy
                         resXY = largest_small_buyX(S[t], tau)
                         swap(0, resXY[1]*2, tau)
                         total_large_trades +=1
+                        arb_trades = exec_arbitrage_trade(S[t], tau)
+                        assert(arb_trades==1)
                     else:
                         # sell: swap x for y
                         resXY = largest_small_sellX(S[t], tau)
                         swap(resXY[0]*2, 1, tau)
                         total_large_trades +=1
+                        arb_trades = exec_arbitrage_trade(S[t], tau)
+                        assert(arb_trades==1)
                 # optimal arbitrage trade if outside bounds
-                total_arb_trades += exec_arbitrage_trade(S[t], tau)
+                total_arb_trades += arb_trades
         # record funds
         #updatePhi
         Phi = Phi + (x0 - x) * (S[t] - S_)
@@ -249,13 +280,13 @@ if __name__=="__main__":
     
     np.random.seed(42)
     N= 200_000
-    #N = 400
+    #N = 50_000
     [S, ts] = load_data(N=N)
     SStats(S)
     print(stats.describe(S))
     tau_vec = [0.0001, 0.0005, 0.0010, 0.0015, 0.0030]
-    prob_trade_vec = [1,1,0]#[0, 0.25, 0.4, 0.5]
-    prob_small_vec = [1,0,0]#[0, 0.5, 1]
+    prob_trade_vec = [1,1,0]
+    prob_small_vec = [1,0,0]
 
     dfSummary = pd.DataFrame()
     k = 0
@@ -272,7 +303,8 @@ if __name__=="__main__":
                 axis=0)
             T = S.shape[0] - 1
             E = prob_trade * ((1-p)*2+p)
-        display(dfSummary)    
+            display(dfSummary)    
+        
         k+=1
 
     roundDF(dfSummary, 2, ["Y", "Vbh", "Vlp", "IL", "Phi"])
