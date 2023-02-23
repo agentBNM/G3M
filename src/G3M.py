@@ -235,7 +235,7 @@ def sim(prob_small, prob_trade, y_start, tau):
                 total_arb_trades += arb_trades
         # record funds
         #updatePhi
-        Phi = Phi + (x0 - x) * (S[t] - S_)
+        Phi = Phi + (x0 - x_) * (S[t] - S_)
         vbh = y0 + S[t]*x0
         vlp = y + S[t]*x
         vimp = vbh-vlp
