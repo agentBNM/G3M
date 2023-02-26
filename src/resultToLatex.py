@@ -10,9 +10,11 @@ if __name__=="__main__":
     numTrades = dfSummary["ArbTrades"]+dfSummary["LargeTrades"]+dfSummary["SmallTrades"]
     
     dfSummary["IL/#T"] = dfSummary["IL"]/numTrades
-    dfSummary["IL/#T"] = dfSummary["IL/#T"].astype('float').round(1)
+    dfSummary["IL/#T"] = dfSummary["IL/#T"].map('{:,.1f}'.format)
     dfSummary["RelErr"] = (dfSummary["Phi"]-dfSummary["IL"])/(dfSummary["Vlp"]+dfSummary["IL"])*100
-    dfSummary["RelErr"] = dfSummary["RelErr"].astype('float').round(1)
+    dfSummary["RelErr"]=dfSummary["RelErr"].map('{:,.1f}'.format)
+    dfSummary["tau (bps)"]=dfSummary["tau (bps)"].map('{:,.0f}'.format)
+    #dfSummary["RelErr"] = dfSummary["RelErr"].astype('float').round(1)
     dfSummary.columns = ["$\tau$", "$p$", "$p^{(S)}$", "$V_T$", "${\Psi}_T$", "$\hat{\Psi}_T$", "\#Arb", "\#Large", "\#Small", "IL/\#T", "RelErr"]
     dfSummary["\#Small"]=dfSummary["\#Small"].map('{:,}'.format)
     dfSummary["\#Large"]=dfSummary["\#Large"].map('{:,}'.format)
